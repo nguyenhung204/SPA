@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,6 +33,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/admin")
 public class AdminPU {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminPU.class);
 
     private final HazelcastInstance hz;
     private final ProductMongoRepository productRepo;
@@ -59,6 +63,7 @@ public class AdminPU {
         IMap<String, Product> productMap = hz.getMap(PRODUCTS_MAP);
         IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
 
+        log.info("[Admin] SEED START — count={} stockPerProduct={}", count, stock);
         List<Product> products = new ArrayList<>(count);
         for (int i = 1; i <= count; i++) {
             String id = UUID.randomUUID().toString();
@@ -72,13 +77,16 @@ public class AdminPU {
         }
 
         // Persist to MongoDB
+        log.info("[Admin] Saving {} products to MongoDB...", products.size());
         productRepo.saveAll(products);
+        log.info("[Admin] MongoDB save complete.");
 
         // Load into Hazelcast (applies to all cluster nodes via distributed map)
         for (Product p : products) {
             productMap.put(p.getId(), p);
             stockMap.put(p.getId(), stock);
         }
+        log.info("[Admin] SEED DONE — {} products loaded into Hazelcast. sampleId={}", count, products.get(0).getId());
 
         return ResponseEntity.ok(Map.of(
                 "seeded", count,
@@ -89,9 +97,11 @@ public class AdminPU {
 
     @DeleteMapping("/reset")
     public ResponseEntity<Map<String, String>> reset() {
+        log.info("[Admin] RESET — clearing Hazelcast maps: products, stocks, carts");
         hz.getMap(PRODUCTS_MAP).clear();
         hz.getMap(STOCKS_MAP).clear();
         hz.getMap("carts").clear();
+        log.info("[Admin] RESET complete.");
         return ResponseEntity.ok(Map.of("status", "Hazelcast maps cleared"));
     }
 }
