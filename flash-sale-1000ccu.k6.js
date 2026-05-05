@@ -11,9 +11,12 @@ const SEED_STOCK  = Number(__ENV.SEED_STOCK   || 2000);
 const QUANTITY    = Number(__ENV.QUANTITY     || 1);
 const USER_PREFIX = __ENV.USER_PREFIX  || 'flash-sale-user';
 const MAX_VUS     = Number(__ENV.MAX_VUS      || 1000);
-const RAMP_UP   = __ENV.RAMP_UP      || '30s';
+const RAMP_UP   = __ENV.RAMP_UP      || '10s';
 const STEADY      = __ENV.STEADY       || '30s';
 const RAMP_DOWN   = __ENV.RAMP_DOWN    || '10s';
+
+// Parse RAMP_UP string (e.g. "10s", "30s") → number of seconds for jitter window
+const RAMP_UP_SEC = Number(RAMP_UP.replace(/[^0-9]/g, '')) || 10;
 
 const TOTAL_STOCK = SEED_COUNT * SEED_STOCK;
 
@@ -86,9 +89,9 @@ export default function (data) {
   const productId = productIds[(__VU + __ITER) % productIds.length];
   const userId    = `${USER_PREFIX}-${__VU}-${__ITER}`;
 
-  // Jitter: trải đều burst — 1000 VU cùng lúc không được phép bắn cùng một lúc.
-  // Math.random()*0.5 → mỗi VU ngẫu nhiên delay 0–500ms trước cart/add.
-  sleep(Math.random() * 0.5);
+  // Jitter nhỏ (0–1s): de-sync các VU được spawn cùng lúc trong 1 giây.
+  // Ramp-up đã tự trải đều load theo thời gian — jitter không cần lớn hơn 1s.
+  sleep(Math.random());
 
   // --- Step 1: Add to cart (retry up to 10x với exponential backoff) ----------
   let addRes;
