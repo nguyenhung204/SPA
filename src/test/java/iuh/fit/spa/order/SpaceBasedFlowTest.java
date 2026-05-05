@@ -9,7 +9,6 @@ import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.Hazelcast;
@@ -29,8 +28,6 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.support.TransactionCallback;
-import org.springframework.transaction.support.TransactionTemplate;
 
 class SpaceBasedFlowTest {
 
@@ -39,7 +36,6 @@ class SpaceBasedFlowTest {
     private CartPU cartPU;
     private OrderPU orderPU;
     private MongoTemplate mongoTemplate;
-    private TransactionTemplate transactionTemplate;
     private MongoDataPump dataPump;
 
     @BeforeEach
@@ -49,13 +45,7 @@ class SpaceBasedFlowTest {
         cartPU = new CartPU(hz);
         orderPU = new OrderPU(hz, new InventoryPU(hz));
         mongoTemplate = mock(MongoTemplate.class);
-        transactionTemplate = mock(TransactionTemplate.class);
-        // Execute callback inline (no real DB transaction needed in unit tests)
-        when(transactionTemplate.execute(any())).thenAnswer(inv -> {
-            TransactionCallback<?> callback = inv.getArgument(0);
-            return callback.doInTransaction(null);
-        });
-        dataPump = new MongoDataPump(hz, mongoTemplate, transactionTemplate);
+        dataPump = new MongoDataPump(hz, mongoTemplate);
         dataPump.init();
 
         Product product = new Product("p1", "Flash Sale Phone", "RAM-backed product", BigDecimal.valueOf(499), 5);
@@ -117,7 +107,7 @@ class SpaceBasedFlowTest {
 
     @Test
     void queueDistributesOneOrderToOnlyOneDataPump() {
-        MongoDataPump secondDataPump = new MongoDataPump(hz, mongoTemplate, transactionTemplate);
+        MongoDataPump secondDataPump = new MongoDataPump(hz, mongoTemplate);
         secondDataPump.init();
         try {
             cartPU.addToCart(cartRequest("u1", "p1", 1));

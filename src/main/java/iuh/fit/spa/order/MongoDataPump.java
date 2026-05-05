@@ -4,17 +4,12 @@ import static iuh.fit.spa.config.HazelcastConfig.ORDER_QUEUE;
 
 import com.hazelcast.collection.IQueue;
 import com.hazelcast.core.HazelcastInstance;
-import iuh.fit.spa.cart.CartItem;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @Component
 public class MongoDataPump {
@@ -24,15 +19,11 @@ public class MongoDataPump {
 
     private final HazelcastInstance hz;
     private final MongoTemplate mongoTemplate;
-    private final TransactionTemplate transactionTemplate;
     private Thread workerThread;
 
-    public MongoDataPump(HazelcastInstance hz,
-                         MongoTemplate mongoTemplate,
-                         TransactionTemplate transactionTemplate) {
+    public MongoDataPump(HazelcastInstance hz, MongoTemplate mongoTemplate) {
         this.hz = hz;
         this.mongoTemplate = mongoTemplate;
-        this.transactionTemplate = transactionTemplate;
     }
 
     @PostConstruct
@@ -85,30 +76,9 @@ public class MongoDataPump {
         }
     }
 
-    /**
-     * Atomic transaction:
-     *   1. Insert order document into `orders` collection
-     *   2. $inc stock for each item in `products` collection
-     * If either step fails, the whole transaction is rolled back.
-     */
     private void persistWithTransaction(OrderEvent event) {
-        transactionTemplate.execute(status -> {
-            // Step 1: save order
-            OrderDocument doc = new OrderDocument(event.getOrderId(), event.getUserId(), event.getItems());
-            mongoTemplate.save(doc);
-            log.debug("[MongoDataPump] Order document saved — orderId={}", event.getOrderId());
-
-            // Step 2: decrement stock for each item atomically
-            for (CartItem item : event.getItems()) {
-                mongoTemplate.updateFirst(
-                        Query.query(Criteria.where("_id").is(item.getProductId())),
-                        new Update().inc("stock", -item.getQuantity()),
-                        "products"
-                );
-                log.debug("[MongoDataPump] Stock decremented — productId={} qty={}",
-                        item.getProductId(), item.getQuantity());
-            }
-            return null;
-        });
+        OrderDocument doc = new OrderDocument(event.getOrderId(), event.getUserId(), event.getItems());
+        mongoTemplate.save(doc);
+        log.debug("[MongoDataPump] Order document saved — orderId={}", event.getOrderId());
     }
 }
