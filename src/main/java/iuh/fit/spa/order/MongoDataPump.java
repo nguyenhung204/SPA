@@ -19,7 +19,8 @@ public class MongoDataPump {
 
     private final HazelcastInstance hz;
     private final MongoTemplate mongoTemplate;
-    private Thread workerThread;
+    private java.util.concurrent.ExecutorService executor;
+    private static final int THREAD_COUNT = 20;
 
     public MongoDataPump(HazelcastInstance hz, MongoTemplate mongoTemplate) {
         this.hz = hz;
@@ -28,35 +29,34 @@ public class MongoDataPump {
 
     @PostConstruct
     public void init() {
-        log.info("[MongoDataPump] Starting background worker thread...");
-        workerThread = new Thread(this::pumpOrders, "mongo-data-pump");
-        workerThread.start();
-        log.info("[MongoDataPump] Worker thread started.");
+        log.info("[MongoDataPump] Starting background worker pool with {} threads...", THREAD_COUNT);
+        executor = java.util.concurrent.Executors.newFixedThreadPool(THREAD_COUNT);
+        for (int i = 0; i < THREAD_COUNT; i++) {
+            executor.submit(this::pumpOrders);
+        }
     }
 
     @PreDestroy
     public void shutdown() {
-        log.info("[MongoDataPump] Shutting down worker thread...");
-        if (workerThread != null) {
-            workerThread.interrupt();
+        log.info("[MongoDataPump] Shutting down worker pool...");
+        if (executor != null) {
+            executor.shutdownNow();
         }
     }
 
     private void pumpOrders() {
-        log.info("[MongoDataPump] Listening on order-queue...");
         IQueue<OrderEvent> queue = hz.getQueue(ORDER_QUEUE);
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 OrderEvent event = queue.take();
-                log.info("[MongoDataPump] Order received — orderId={} userId={} items={}",
-                        event.getOrderId(), event.getUserId(), event.getItems().size());
                 persistWithRetry(event);
             } catch (InterruptedException e) {
-                log.warn("[MongoDataPump] Worker interrupted — stopping.");
                 Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                log.error("[MongoDataPump] Unexpected error in worker thread: {}", e.getMessage());
             }
         }
-        log.info("[MongoDataPump] Worker thread stopped.");
     }
 
     private void persistWithRetry(OrderEvent event) {

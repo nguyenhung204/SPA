@@ -54,8 +54,7 @@ public class OrderPU {
             deductedItems.add(item);
         }
 
-        hz.getMap(CARTS_MAP).remove(userId);
-        log.info("[Checkout] Cart cleared — userId={}", userId);
+
 
         OrderEvent newOrder = new OrderEvent(UUID.randomUUID().toString(), userId, cart.getItems());
         boolean queued = hz.<OrderEvent>getQueue(ORDER_QUEUE).offer(newOrder);
@@ -65,6 +64,7 @@ public class OrderPU {
             return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
         }
         log.info("[Checkout] Order queued — orderId={} userId={} items={}", newOrder.getOrderId(), userId, cart.getItems().size());
+        hz.getMap(CARTS_MAP).remove(userId);
 
         return ResponseEntity.ok("Order Placed: " + newOrder.getOrderId());
     }

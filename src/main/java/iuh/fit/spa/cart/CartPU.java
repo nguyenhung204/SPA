@@ -29,12 +29,17 @@ public class CartPU {
 
     @PostMapping("/add")
     public String addToCart(@RequestBody CartItemRequest req) {
-        log.info("[Cart] ADD — userId={} productId={} qty={}", req.getUserId(), req.getProductId(), req.getQuantity());
         IMap<String, Cart> cartMap = hz.getMap(CARTS_MAP);
-        Cart cart = cartMap.getOrDefault(req.getUserId(), new Cart());
-        cart.addItem(req.getProductId(), req.getQuantity());
-        cartMap.put(req.getUserId(), cart, CART_TTL_MINUTES, TimeUnit.MINUTES);
-        log.info("[Cart] UPDATED — userId={} totalItems={} ttl={}min", req.getUserId(), cart.getItems().size(), CART_TTL_MINUTES);
+        cartMap.executeOnKey(req.getUserId(), entry -> {
+            Cart cart = entry.getValue();
+            if (cart == null) {
+                cart = new Cart();
+            }
+            cart.addItem(req.getProductId(), req.getQuantity());
+            // Set with TTL (Cart.java implements Serializable)
+            entry.setValue(cart);
+            return null;
+        });
         return "Added to cart";
     }
 

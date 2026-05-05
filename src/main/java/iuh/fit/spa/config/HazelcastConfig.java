@@ -48,12 +48,18 @@ public class HazelcastConfig {
 
         JoinConfig join = config.getNetworkConfig().getJoin();
         join.getMulticastConfig().setEnabled(false);
-        join.getTcpIpConfig()
+        config.getNetworkConfig().getJoin().getTcpIpConfig()
                 .setEnabled(true)
+                .addMember("127.0.0.1")
                 .addMember("192.168.11.176")
                 .addMember("192.168.10.227")
                 .addMember("192.168.11.188")
                 .addMember("192.168.11.195");
+
+        // Carts Map Config: 30 minutes TTL to prevent memory leaks
+        config.addMapConfig(new com.hazelcast.config.MapConfig(CARTS_MAP)
+                .setTimeToLiveSeconds(30 * 60)
+                .setBackupCount(1));
 
         log.info("[Hazelcast] Starting cluster 'flashsale-local' — members: 192.168.11.176, 192.168.10.227, 192.168.11.188");
         HazelcastInstance hz = Hazelcast.newHazelcastInstance(config);
