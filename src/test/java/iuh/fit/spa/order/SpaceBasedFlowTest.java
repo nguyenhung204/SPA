@@ -35,6 +35,7 @@ class SpaceBasedFlowTest {
     private CartPU cartPU;
     private OrderPU orderPU;
     private OrderMongoRepository orderRepo;
+    private MongoDataPump dataPump;
 
     @BeforeEach
     void setUp() {
@@ -43,7 +44,8 @@ class SpaceBasedFlowTest {
         cartPU = new CartPU(hz);
         orderPU = new OrderPU(hz, new InventoryPU(hz));
         orderRepo = mock(OrderMongoRepository.class);
-        new MongoDataPump(hz, orderRepo).init();
+        dataPump = new MongoDataPump(hz, orderRepo);
+        dataPump.init();
 
         Product product = new Product("p1", "Flash Sale Phone", "RAM-backed product", BigDecimal.valueOf(499), 5);
         hz.<String, Product>getMap(PRODUCTS_MAP).put(product.getId(), product);
@@ -52,6 +54,9 @@ class SpaceBasedFlowTest {
 
     @AfterEach
     void tearDown() {
+        if (dataPump != null) {
+            dataPump.shutdown();
+        }
         hz.shutdown();
     }
 
@@ -97,6 +102,22 @@ class SpaceBasedFlowTest {
         assertThat(hz.<String, Integer>getMap(STOCKS_MAP).get("p1")).isEqualTo(5);
         assertThat(hz.<String, Cart>getMap(CARTS_MAP).get("u1")).isNotNull();
         verify(orderRepo, after(300).never()).save(any());
+    }
+
+    @Test
+    void queueDistributesOneOrderToOnlyOneDataPump() {
+        MongoDataPump secondDataPump = new MongoDataPump(hz, orderRepo);
+        secondDataPump.init();
+        try {
+            cartPU.addToCart(cartRequest("u1", "p1", 1));
+
+            ResponseEntity<String> response = orderPU.checkout("u1");
+
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+            verify(orderRepo, timeout(3000).times(1)).save(any());
+        } finally {
+            secondDataPump.shutdown();
+        }
     }
 
     private CartItemRequest cartRequest(String userId, String productId, int quantity) {

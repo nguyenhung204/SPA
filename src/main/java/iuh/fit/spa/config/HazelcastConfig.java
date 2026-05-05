@@ -1,6 +1,7 @@
 package iuh.fit.spa.config;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.JoinConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
@@ -16,7 +17,7 @@ public class HazelcastConfig {
     public static final String PRODUCTS_MAP = "products";
     public static final String CARTS_MAP = "carts";
     public static final String STOCKS_MAP = "stocks";
-    public static final String ORDER_EVENTS_TOPIC = "order-events";
+    public static final String ORDER_QUEUE = "order-queue";
 
     private final ProductMongoRepository productRepo;
 
@@ -28,8 +29,11 @@ public class HazelcastConfig {
     public HazelcastInstance hazelcastInstance() {
         Config config = new Config();
         config.setClusterName("flashsale-local");
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
-        config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        JoinConfig join = config.getNetworkConfig().getJoin();
+        join.getMulticastConfig().setEnabled(false);
+        join.getTcpIpConfig()
+                .setEnabled(true)
+                .addMember("127.0.0.1");
 
         HazelcastInstance hz = Hazelcast.newHazelcastInstance(config);
         loadProductsAndStocks(hz);
