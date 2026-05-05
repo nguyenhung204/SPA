@@ -93,11 +93,29 @@ public class AdminPU {
         }
         log.info("[Admin] SEED DONE — {} products loaded into Hazelcast. sampleId={}", count, products.get(0).getId());
 
+        List<String> productIds = products.stream().map(Product::getId).toList();
         return ResponseEntity.ok(Map.of(
                 "seeded", count,
                 "stockPerProduct", stock,
-                "sampleId", products.get(0).getId()
+                "sampleId", products.get(0).getId(),
+                "productIds", productIds
         ));
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/products")
+    public ResponseEntity<Map<String, Object>> listProducts() {
+        IMap<String, Product> productMap = hz.getMap(PRODUCTS_MAP);
+        IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
+        List<Map<String, Object>> items = productMap.values().stream()
+                .map(p -> {
+                    Map<String, Object> entry = new java.util.LinkedHashMap<>();
+                    entry.put("id", p.getId());
+                    entry.put("name", p.getName());
+                    entry.put("stock", stockMap.getOrDefault(p.getId(), 0));
+                    return entry;
+                })
+                .toList();
+        return ResponseEntity.ok(Map.of("count", items.size(), "products", items));
     }
 
     @DeleteMapping("/reset")

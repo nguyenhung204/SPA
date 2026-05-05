@@ -96,7 +96,7 @@ public class HazelcastConfig {
 
         log.info("[RAM Load] Fetching products from MongoDB...");
         List<Product> products = productRepo.findAll();
-        if (products == null) {
+        if (products.isEmpty()) {
             log.warn("[RAM Load] No products found in MongoDB — Hazelcast maps are empty.");
             return;
         }
