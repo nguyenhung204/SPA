@@ -40,7 +40,9 @@ public class AdminPU {
         this.productRepo = productRepo;
     }
 
-    @PostMapping("/seed")
+    @RequestMapping(value = "/seed", method = {
+            org.springframework.web.bind.annotation.RequestMethod.GET,
+            org.springframework.web.bind.annotation.RequestMethod.POST })
     public ResponseEntity<Map<String, Object>> seed(
             @RequestParam(defaultValue = "10") int count,
             @RequestParam(defaultValue = "100") int stock) {
