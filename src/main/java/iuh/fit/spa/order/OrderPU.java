@@ -54,7 +54,10 @@ public class OrderPU {
             deductedItems.add(item);
         }
 
-        OrderEvent newOrder = new OrderEvent(UUID.randomUUID().toString(), userId, cart.getItems());
+        // Dùng nanoTime + random để tạo ID nhanh hơn UUID.randomUUID()
+        String orderId = System.nanoTime() + "-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000);
+        OrderEvent newOrder = new OrderEvent(orderId, userId, cart.getItems());
+
         // Chờ tối đa 500ms nếu hàng đợi đầy thay vì trả về lỗi ngay lập tức
         try {
             boolean queued = orderQueue.offer(newOrder, 500, java.util.concurrent.TimeUnit.MILLISECONDS);

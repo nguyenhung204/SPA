@@ -31,12 +31,12 @@ public class CartPU {
 
     @PostMapping("/add")
     public String addToCart(@RequestBody CartItemRequest req) {
-        final String pid = req.getProductId();
-        final int qty = req.getQuantity();
-
-        cartMap.executeOnKey(req.getUserId(), new AddToCartProcessor(pid, qty));
+        // Chạy bất đồng bộ, Tomcat thread sẽ trả về "Added to cart" ngay lập tức
+        // Hazelcast sẽ tự xử lý việc cập nhật trong background
+        cartMap.submitToKey(req.getUserId(), new AddToCartProcessor(req.getProductId(), req.getQuantity()));
         return "Added to cart";
     }
+
 
     private static class AddToCartProcessor implements com.hazelcast.map.EntryProcessor<String, Cart, Void>, java.io.Serializable {
         private final String productId;
