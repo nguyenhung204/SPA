@@ -52,8 +52,7 @@ public class HazelcastConfig {
                 .setEnabled(true)
                 .addMember("192.168.11.176")
                 .addMember("192.168.10.227")
-                .addMember("192.168.11.188")
-                .addMember("192.168.11.195");
+                .addMember("192.168.11.188");
 
         log.info("[Hazelcast] Starting cluster 'flashsale-local' — members: 192.168.11.176, 192.168.10.227, 192.168.11.188");
         HazelcastInstance hz = Hazelcast.newHazelcastInstance(config);
