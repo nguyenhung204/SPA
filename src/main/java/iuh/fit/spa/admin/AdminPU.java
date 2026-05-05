@@ -1,5 +1,6 @@
 package iuh.fit.spa.admin;
 
+import static iuh.fit.spa.config.HazelcastConfig.CARTS_MAP;
 import static iuh.fit.spa.config.HazelcastConfig.PRODUCTS_MAP;
 import static iuh.fit.spa.config.HazelcastConfig.STOCKS_MAP;
 
@@ -68,6 +69,7 @@ public class AdminPU {
         productRepo.deleteAll();
         productMap.clear();
         stockMap.clear();
+        hz.getMap(CARTS_MAP).clear();
         log.info("[Admin] SEED START — count={} stockPerProduct={}", count, stock);
         List<Product> products = new ArrayList<>(count);
         for (int i = 1; i <= count; i++) {
