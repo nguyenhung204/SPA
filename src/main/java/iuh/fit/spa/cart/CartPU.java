@@ -22,9 +22,11 @@ public class CartPU {
     private static final long CART_TTL_MINUTES = 30;
 
     private final HazelcastInstance hz;
+    private final IMap<String, Cart> cartMap;
 
     public CartPU(HazelcastInstance hz) {
         this.hz = hz;
+        this.cartMap = hz.getMap(CARTS_MAP);
     }
 
     @PostMapping("/add")
@@ -32,23 +34,35 @@ public class CartPU {
         final String pid = req.getProductId();
         final int qty = req.getQuantity();
 
-        IMap<String, Cart> cartMap = hz.getMap(CARTS_MAP);
-        cartMap.executeOnKey(req.getUserId(), entry -> {
+        cartMap.executeOnKey(req.getUserId(), new AddToCartProcessor(pid, qty));
+        return "Added to cart";
+    }
+
+    private static class AddToCartProcessor implements com.hazelcast.map.EntryProcessor<String, Cart, Void>, java.io.Serializable {
+        private final String productId;
+        private final int quantity;
+
+        public AddToCartProcessor(String productId, int quantity) {
+            this.productId = productId;
+            this.quantity = quantity;
+        }
+
+        @Override
+        public Void process(java.util.Map.Entry<String, Cart> entry) {
             Cart cart = entry.getValue();
             if (cart == null) {
                 cart = new Cart();
             }
-            cart.addItem(pid, qty);
+            cart.addItem(productId, quantity);
             entry.setValue(cart);
             return null;
-        });
-        return "Added to cart";
+        }
     }
 
     @GetMapping("/{userId}")
+
     public Cart getCart(@PathVariable String userId) {
-        Cart cart = hz.<String, Cart>getMap(CARTS_MAP).get(userId);
-        log.info("[Cart] GET — userId={} found={}", userId, cart != null);
-        return cart;
+        return cartMap.get(userId);
     }
 }
+

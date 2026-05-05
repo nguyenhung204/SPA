@@ -16,9 +16,11 @@ public class InventoryPU {
     private static final Logger log = LoggerFactory.getLogger(InventoryPU.class);
 
     private final HazelcastInstance hz;
+    private final IMap<String, Integer> stockMap;
 
     public InventoryPU(HazelcastInstance hz) {
         this.hz = hz;
+        this.stockMap = hz.getMap(STOCKS_MAP);
     }
 
     /**
@@ -27,44 +29,37 @@ public class InventoryPU {
      * a single network hop, no retries, no contention.
      */
     public boolean deductStock(String productId, int quantity) {
-        if (quantity <= 0) {
-            log.warn("[Inventory] DEDUCT rejected — productId={} qty={} (invalid)", productId, quantity);
-            return false;
-        }
-
-        IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
-        Boolean result = (Boolean) stockMap.executeOnKey(productId,
-                (EntryProcessor<String, Integer, Boolean>) entry -> {
-                    Integer current = entry.getValue();
-                    if (current == null || current < quantity) return false;
-                    entry.setValue(current - quantity);
-                    return true;
-                });
-
-        if (Boolean.TRUE.equals(result)) {
-            log.info("[Inventory] DEDUCTED — productId={} qty={}", productId, quantity);
-        } else {
-            log.warn("[Inventory] SOLD OUT — productId={} requested={}", productId, quantity);
-        }
-        return Boolean.TRUE.equals(result);
+        if (quantity <= 0) return false;
+        return Boolean.TRUE.equals(stockMap.executeOnKey(productId, new DeductStockProcessor(quantity)));
     }
 
-    /**
-     * Atomically restores stock using an EntryProcessor (used on rollback).
-     */
     public void restoreStock(String productId, int quantity) {
-        if (quantity <= 0) {
-            log.warn("[Inventory] RESTORE rejected — productId={} qty={} (invalid)", productId, quantity);
-            return;
-        }
+        if (quantity <= 0) return;
+        stockMap.executeOnKey(productId, new RestoreStockProcessor(quantity));
+    }
 
-        IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
-        stockMap.executeOnKey(productId,
-                (EntryProcessor<String, Integer, Void>) entry -> {
-                    Integer current = entry.getValue();
-                    entry.setValue((current == null ? 0 : current) + quantity);
-                    return null;
-                });
-        log.info("[Inventory] RESTORED — productId={} qty={}", productId, quantity);
+    private static class DeductStockProcessor implements EntryProcessor<String, Integer, Boolean>, java.io.Serializable {
+        private final int quantity;
+        public DeductStockProcessor(int quantity) { this.quantity = quantity; }
+        @Override
+        public Boolean process(Map.Entry<String, Integer> entry) {
+            Integer current = entry.getValue();
+            if (current == null || current < quantity) return false;
+            entry.setValue(current - quantity);
+            return true;
+        }
+    }
+
+    private static class RestoreStockProcessor implements EntryProcessor<String, Integer, Void>, java.io.Serializable {
+        private final int quantity;
+        public RestoreStockProcessor(int quantity) { this.quantity = quantity; }
+        @Override
+        public Void process(Map.Entry<String, Integer> entry) {
+            Integer current = entry.getValue();
+            entry.setValue((current == null ? 0 : current) + quantity);
+            return null;
+        }
     }
 }
+
+
