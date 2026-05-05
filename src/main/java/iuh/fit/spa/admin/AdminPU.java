@@ -63,6 +63,11 @@ public class AdminPU {
         IMap<String, Product> productMap = hz.getMap(PRODUCTS_MAP);
         IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
 
+        // Xóa data cũ trước để tránh trùng lặp
+        log.info("[Admin] SEED — Clearing old data from MongoDB and Hazelcast...");
+        productRepo.deleteAll();
+        productMap.clear();
+        stockMap.clear();
         log.info("[Admin] SEED START — count={} stockPerProduct={}", count, stock);
         List<Product> products = new ArrayList<>(count);
         for (int i = 1; i <= count; i++) {
@@ -97,11 +102,12 @@ public class AdminPU {
 
     @DeleteMapping("/reset")
     public ResponseEntity<Map<String, String>> reset() {
-        log.info("[Admin] RESET — clearing Hazelcast maps: products, stocks, carts");
+        log.info("[Admin] RESET — clearing MongoDB + Hazelcast maps: products, stocks, carts");
+        productRepo.deleteAll();
         hz.getMap(PRODUCTS_MAP).clear();
         hz.getMap(STOCKS_MAP).clear();
         hz.getMap("carts").clear();
         log.info("[Admin] RESET complete.");
-        return ResponseEntity.ok(Map.of("status", "Hazelcast maps cleared"));
+        return ResponseEntity.ok(Map.of("status", "MongoDB + Hazelcast maps cleared"));
     }
 }
