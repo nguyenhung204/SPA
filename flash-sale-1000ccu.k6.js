@@ -5,9 +5,9 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 // ---------------------------------------------------------------------------
 // Config — override via -e VAR=value
 // ---------------------------------------------------------------------------
-const BASE_URL   = __ENV.BASE_URL    || 'http://192.168.10.227';
+const BASE_URL   = __ENV.BASE_URL    || 'http://localhost:8080';
 const SEED_COUNT = Number(__ENV.SEED_COUNT  || 100);
-const SEED_STOCK = Number(__ENV.SEED_STOCK  || 1000);
+const SEED_STOCK = Number(__ENV.SEED_STOCK  || 2000);
 const QUANTITY   = Number(__ENV.QUANTITY    || 1);
 const USER_PREFIX = __ENV.USER_PREFIX || 'flash-sale-user';
 
@@ -38,7 +38,7 @@ export const options = {
         { duration: '30s', target: 1000 },
         { duration: '10s', target: 0  },
       ],
-      gracefulRampDown: '0s',
+      gracefulRampDown: '10s',
     },
   },
   thresholds: {
@@ -85,7 +85,7 @@ export default function (data) {
   const addRes = http.post(
     `${BASE_URL}/cart/add`,
     JSON.stringify({ userId, productId, quantity: QUANTITY }),
-    { headers: { 'Content-Type': 'application/json' }, tags: { api: 'cart_add' } },
+    { headers: { 'Content-Type': 'application/json' }, tags: { api: 'cart_add', name: 'POST /cart/add' } },
   );
 
   const cartOk = check(addRes, { 'cart/add: 200': (r) => r.status === 200 });
@@ -104,7 +104,7 @@ export default function (data) {
   const checkoutRes = http.post(
     `${BASE_URL}/checkout?userId=${encodeURIComponent(userId)}`,
     null,
-    { tags: { api: 'checkout' } },
+    { tags: { api: 'checkout', name: 'POST /checkout' } },
   );
 
   checkoutLatency.add(checkoutRes.timings.duration);
@@ -192,6 +192,7 @@ export function handleSummary(data) {
   const p99  = data.metrics.checkout_latency_ms?.values?.['p(99)'] || 0;
   const avg  = data.metrics.checkout_latency_ms?.values?.avg        || 0;
   const pass = serverErrors === 0;
+  const remainingStock = TOTAL_STOCK - success * QUANTITY;
 
   const text = `
 FLASH SALE 1000 CCU — SPACE-BASED ARCHITECTURE
@@ -213,10 +214,10 @@ p99 : ${p99.toFixed(2)} ms
 
 --- Stock ---
 Ordered (from metrics) : ${success} units
-Remaining stock        : see teardown output above (live Hazelcast read)
+Remaining stock        : ${remainingStock} / ${TOTAL_STOCK} units
 
 RESULT: ${pass ? 'PASS (no 5xx)' : 'FAIL (server errors detected)'}
-NOTE: latency p95=${p95.toFixed(0)}ms — xem teardown output cho stock còn lại
+NOTE: latency p95=${p95.toFixed(0)}ms — xem teardown output cho breakdown per-product
 `;
 
   const report = {
@@ -229,6 +230,11 @@ NOTE: latency p95=${p95.toFixed(0)}ms — xem teardown output cho stock còn l�
       checkoutBadRequestOther400: badOther,
       checkoutServerErrors5xx: serverErrors,
       cartAddFailures: cartFails,
+    },
+    stock: {
+      initial: TOTAL_STOCK,
+      sold: success * QUANTITY,
+      remaining: remainingStock,
     },
     latencyMs: data.metrics.checkout_latency_ms?.values || {},
     pass,
