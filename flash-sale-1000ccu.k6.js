@@ -5,7 +5,17 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 // ---------------------------------------------------------------------------
 // Config — override via -e VAR=value
 // ---------------------------------------------------------------------------
+// Admin ops (seed/reset/teardown) go through nginx
 const BASE_URL    = __ENV.BASE_URL     || 'http://192.168.10.227';
+
+// Load test VUs go DIRECTLY to backends — bypass nginx Windows select() 1024 FD limit.
+// Each VU is pinned to one backend via round-robin (__VU % 3).
+const BACKENDS = [
+  __ENV.BACKEND_1 || 'http://192.168.11.176:8080',
+  __ENV.BACKEND_2 || 'http://192.168.10.227:8080',
+  __ENV.BACKEND_3 || 'http://192.168.11.188:8080',
+];
+
 const SEED_COUNT  = Number(__ENV.SEED_COUNT   || 100);
 const SEED_STOCK  = Number(__ENV.SEED_STOCK   || 2000);
 const QUANTITY    = Number(__ENV.QUANTITY     || 1);
@@ -95,6 +105,9 @@ export function setup() {
 export default function (data) {
   const productIds = data.productIds;
 
+  // Each VU is pinned to one backend (round-robin) — bypasses nginx FD bottleneck
+  const vuUrl = BACKENDS[(__VU - 1) % BACKENDS.length];
+
   // Round-robin across the product pool so all 100 products get hit evenly
   const productId = productIds[(__VU + __ITER) % productIds.length];
   const userId    = `${USER_PREFIX}-${__VU}-${__ITER}`;
@@ -109,7 +122,7 @@ export default function (data) {
   for (let attempt = 0; attempt < 10 && !cartOk; attempt++) {
     if (attempt > 0) sleep(Math.min(0.1 * Math.pow(2, attempt - 1), 2.0)); // 0.1, 0.2, 0.4, 0.8, 1.6, 2.0...
     addRes = http.post(
-      `${BASE_URL}/cart/add`,
+      `${vuUrl}/cart/add`,
       JSON.stringify({ userId, productId, quantity: QUANTITY }),
       { headers: { 'Content-Type': 'application/json' }, tags: { api: 'cart_add', name: 'POST /cart/add' } },
     );
@@ -129,7 +142,7 @@ export default function (data) {
 
   // --- Step 2: Checkout (one product, sequential per-product deduction) ------
   const checkoutRes = http.post(
-    `${BASE_URL}/checkout?userId=${encodeURIComponent(userId)}`,
+    `${vuUrl}/checkout?userId=${encodeURIComponent(userId)}`,
     null,
     { tags: { api: 'checkout', name: 'POST /checkout' } },
   );
