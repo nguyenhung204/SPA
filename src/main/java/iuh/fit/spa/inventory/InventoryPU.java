@@ -3,7 +3,9 @@ package iuh.fit.spa.inventory;
 import static iuh.fit.spa.config.HazelcastConfig.STOCKS_MAP;
 
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.IMap;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,6 +21,11 @@ public class InventoryPU {
         this.hz = hz;
     }
 
+    /**
+     * Atomically deducts stock using an EntryProcessor that runs on the
+     * partition-owner thread. Eliminates CAS thundering-herd under high load:
+     * a single network hop, no retries, no contention.
+     */
     public boolean deductStock(String productId, int quantity) {
         if (quantity <= 0) {
             log.warn("[Inventory] DEDUCT rejected — productId={} qty={} (invalid)", productId, quantity);
@@ -26,26 +33,25 @@ public class InventoryPU {
         }
 
         IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
-        int attempt = 0;
-        while (true) {
-            attempt++;
-            Integer currentStock = stockMap.get(productId);
-            if (currentStock == null || currentStock < quantity) {
-                log.warn("[Inventory] SOLD OUT — productId={} requested={} available={} attempt={}",
-                        productId, quantity, currentStock, attempt);
-                return false;
-            }
+        Boolean result = (Boolean) stockMap.executeOnKey(productId,
+                (EntryProcessor<String, Integer, Boolean>) entry -> {
+                    Integer current = entry.getValue();
+                    if (current == null || current < quantity) return false;
+                    entry.setValue(current - quantity);
+                    return true;
+                });
 
-            Integer newStock = currentStock - quantity;
-            if (stockMap.replace(productId, currentStock, newStock)) {
-                log.info("[Inventory] DEDUCTED — productId={} qty={} before={} after={} attempt={}",
-                        productId, quantity, currentStock, newStock, attempt);
-                return true;
-            }
-            log.debug("[Inventory] CAS retry — productId={} attempt={}", productId, attempt);
+        if (Boolean.TRUE.equals(result)) {
+            log.info("[Inventory] DEDUCTED — productId={} qty={}", productId, quantity);
+        } else {
+            log.warn("[Inventory] SOLD OUT — productId={} requested={}", productId, quantity);
         }
+        return Boolean.TRUE.equals(result);
     }
 
+    /**
+     * Atomically restores stock using an EntryProcessor (used on rollback).
+     */
     public void restoreStock(String productId, int quantity) {
         if (quantity <= 0) {
             log.warn("[Inventory] RESTORE rejected — productId={} qty={} (invalid)", productId, quantity);
@@ -53,23 +59,12 @@ public class InventoryPU {
         }
 
         IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
-        int attempt = 0;
-        while (true) {
-            attempt++;
-            Integer currentStock = stockMap.get(productId);
-            if (currentStock == null) {
-                stockMap.putIfAbsent(productId, quantity);
-                log.info("[Inventory] RESTORED (new entry) — productId={} qty={}", productId, quantity);
-                return;
-            }
-
-            int restoredStock = currentStock + quantity;
-            if (stockMap.replace(productId, currentStock, restoredStock)) {
-                log.info("[Inventory] RESTORED — productId={} qty={} before={} after={} attempt={}",
-                        productId, quantity, currentStock, restoredStock, attempt);
-                return;
-            }
-            log.debug("[Inventory] CAS retry (restore) — productId={} attempt={}", productId, attempt);
-        }
+        stockMap.executeOnKey(productId,
+                (EntryProcessor<String, Integer, Void>) entry -> {
+                    Integer current = entry.getValue();
+                    entry.setValue((current == null ? 0 : current) + quantity);
+                    return null;
+                });
+        log.info("[Inventory] RESTORED — productId={} qty={}", productId, quantity);
     }
 }

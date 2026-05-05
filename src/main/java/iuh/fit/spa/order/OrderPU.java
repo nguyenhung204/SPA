@@ -58,7 +58,12 @@ public class OrderPU {
         log.info("[Checkout] Cart cleared — userId={}", userId);
 
         OrderEvent newOrder = new OrderEvent(UUID.randomUUID().toString(), userId, cart.getItems());
-        hz.<OrderEvent>getQueue(ORDER_QUEUE).offer(newOrder);
+        boolean queued = hz.<OrderEvent>getQueue(ORDER_QUEUE).offer(newOrder);
+        if (!queued) {
+            log.error("[Checkout] ORDER QUEUE FULL — rolling back stock for orderId={} userId={}", newOrder.getOrderId(), userId);
+            rollbackDeductedItems(deductedItems);
+            return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
+        }
         log.info("[Checkout] Order queued — orderId={} userId={} items={}", newOrder.getOrderId(), userId, cart.getItems().size());
 
         return ResponseEntity.ok("Order Placed: " + newOrder.getOrderId());

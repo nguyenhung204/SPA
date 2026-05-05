@@ -5,13 +5,17 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 // ---------------------------------------------------------------------------
 // Config — override via -e VAR=value
 // ---------------------------------------------------------------------------
-const BASE_URL   = __ENV.BASE_URL    || 'http://localhost:8080';
-const SEED_COUNT = Number(__ENV.SEED_COUNT  || 100);
-const SEED_STOCK = Number(__ENV.SEED_STOCK  || 2000);
-const QUANTITY   = Number(__ENV.QUANTITY    || 1);
-const USER_PREFIX = __ENV.USER_PREFIX || 'flash-sale-user';
+const BASE_URL    = __ENV.BASE_URL     || 'http://192.168.10.227';
+const SEED_COUNT  = Number(__ENV.SEED_COUNT   || 100);
+const SEED_STOCK  = Number(__ENV.SEED_STOCK   || 2000);
+const QUANTITY    = Number(__ENV.QUANTITY     || 1);
+const USER_PREFIX = __ENV.USER_PREFIX  || 'flash-sale-user';
+const MAX_VUS     = Number(__ENV.MAX_VUS      || 1000);
+const RAMP_UP     = __ENV.RAMP_UP      || '10s';
+const STEADY      = __ENV.STEADY       || '30s';
+const RAMP_DOWN   = __ENV.RAMP_DOWN    || '10s';
 
-const TOTAL_STOCK = SEED_COUNT * SEED_STOCK; // 100 × 1000 = 100 000
+const TOTAL_STOCK = SEED_COUNT * SEED_STOCK;
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -31,12 +35,12 @@ export const serverErrorRate        = new Rate('server_error_rate');
 // ---------------------------------------------------------------------------
 export const options = {
   scenarios: {
-    flash_sale_1000_ccu: {
+    flash_sale: {
       executor: 'ramping-vus',
       stages: [
-        { duration: '10s', target: 1000 },
-        { duration: '30s', target: 1000 },
-        { duration: '10s', target: 0  },
+        { duration: RAMP_UP,   target: MAX_VUS },
+        { duration: STEADY,    target: MAX_VUS },
+        { duration: RAMP_DOWN, target: 0       },
       ],
       gracefulRampDown: '10s',
     },
