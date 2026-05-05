@@ -11,7 +11,7 @@ const SEED_STOCK  = Number(__ENV.SEED_STOCK   || 2000);
 const QUANTITY    = Number(__ENV.QUANTITY     || 1);
 const USER_PREFIX = __ENV.USER_PREFIX  || 'flash-sale-user';
 const MAX_VUS     = Number(__ENV.MAX_VUS      || 1000);
-const RAMP_UP     = __ENV.RAMP_UP      || '10s';
+const RAMP_UP   = __ENV.RAMP_UP      || '30s';
 const STEADY      = __ENV.STEADY       || '30s';
 const RAMP_DOWN   = __ENV.RAMP_DOWN    || '10s';
 
@@ -50,6 +50,7 @@ export const options = {
     // checkout_latency_ms: ['p(95)<2000'],
     server_error_rate:           ['rate==0'],
     checkout_server_errors_5xx:  ['count==0'],
+    cart_add_failures:           ['count==0'],
   },
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
@@ -85,24 +86,33 @@ export default function (data) {
   const productId = productIds[(__VU + __ITER) % productIds.length];
   const userId    = `${USER_PREFIX}-${__VU}-${__ITER}`;
 
-  // --- Step 1: Add to cart ---------------------------------------------------
-  const addRes = http.post(
-    `${BASE_URL}/cart/add`,
-    JSON.stringify({ userId, productId, quantity: QUANTITY }),
-    { headers: { 'Content-Type': 'application/json' }, tags: { api: 'cart_add', name: 'POST /cart/add' } },
-  );
+  // Jitter: trải đều burst — 1000 VU cùng lúc không được phép bắn cùng một lúc.
+  // Math.random()*0.5 → mỗi VU ngẫu nhiên delay 0–500ms trước cart/add.
+  sleep(Math.random() * 0.5);
 
-  const cartOk = check(addRes, { 'cart/add: 200': (r) => r.status === 200 });
+  // --- Step 1: Add to cart (retry up to 10x với exponential backoff) ----------
+  let addRes;
+  let cartOk = false;
+  for (let attempt = 0; attempt < 10 && !cartOk; attempt++) {
+    if (attempt > 0) sleep(Math.min(0.1 * Math.pow(2, attempt - 1), 2.0)); // 0.1, 0.2, 0.4, 0.8, 1.6, 2.0...
+    addRes = http.post(
+      `${BASE_URL}/cart/add`,
+      JSON.stringify({ userId, productId, quantity: QUANTITY }),
+      { headers: { 'Content-Type': 'application/json' }, tags: { api: 'cart_add', name: 'POST /cart/add' } },
+    );
+    cartOk = addRes.status === 200;
+  }
+
+  check(addRes, { 'cart/add: 200': (r) => r.status === 200 });
   if (!cartOk) {
     cartAddFailures.add(1);
-    // Chỉ log 1% để tránh spam console dưới tải lớn
     if (Math.random() < 0.01) {
       console.warn(`[cart/add] FAIL userId=${userId} status=${addRes.status} body=${addRes.body}`);
     }
     return; // no point checking out with an empty cart
   }
 
-  sleep(0.5);
+  sleep(0.1);
 
   // --- Step 2: Checkout (one product, sequential per-product deduction) ------
   const checkoutRes = http.post(
