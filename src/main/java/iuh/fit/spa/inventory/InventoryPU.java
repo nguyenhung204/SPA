@@ -63,9 +63,10 @@ public class InventoryPU {
                 return;
             }
 
-            if (stockMap.replace(productId, currentStock, currentStock + quantity)) {
+            int restoredStock = currentStock + quantity;
+            if (stockMap.replace(productId, currentStock, restoredStock)) {
                 log.info("[Inventory] RESTORED — productId={} qty={} before={} after={} attempt={}",
-                        productId, quantity, currentStock, currentStock + quantity, attempt);
+                        productId, quantity, currentStock, restoredStock, attempt);
                 return;
             }
             log.debug("[Inventory] CAS retry (restore) — productId={} attempt={}", productId, attempt);

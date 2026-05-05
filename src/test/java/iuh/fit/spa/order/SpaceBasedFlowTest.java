@@ -9,6 +9,7 @@ import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.Hazelcast;
@@ -25,8 +26,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class SpaceBasedFlowTest {
 
@@ -34,7 +38,8 @@ class SpaceBasedFlowTest {
     private ProductPU productPU;
     private CartPU cartPU;
     private OrderPU orderPU;
-    private OrderMongoRepository orderRepo;
+    private MongoTemplate mongoTemplate;
+    private TransactionTemplate transactionTemplate;
     private MongoDataPump dataPump;
 
     @BeforeEach
@@ -43,8 +48,14 @@ class SpaceBasedFlowTest {
         productPU = new ProductPU(hz);
         cartPU = new CartPU(hz);
         orderPU = new OrderPU(hz, new InventoryPU(hz));
-        orderRepo = mock(OrderMongoRepository.class);
-        dataPump = new MongoDataPump(hz, orderRepo);
+        mongoTemplate = mock(MongoTemplate.class);
+        transactionTemplate = mock(TransactionTemplate.class);
+        // Execute callback inline (no real DB transaction needed in unit tests)
+        when(transactionTemplate.execute(any())).thenAnswer(inv -> {
+            TransactionCallback<?> callback = inv.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+        dataPump = new MongoDataPump(hz, mongoTemplate, transactionTemplate);
         dataPump.init();
 
         Product product = new Product("p1", "Flash Sale Phone", "RAM-backed product", BigDecimal.valueOf(499), 5);
@@ -83,8 +94,8 @@ class SpaceBasedFlowTest {
         assertThat(hz.<String, Cart>getMap(CARTS_MAP).get("u1")).isNull();
 
         ArgumentCaptor<OrderDocument> orderCaptor = ArgumentCaptor.forClass(OrderDocument.class);
-        verify(orderRepo, timeout(3000)).save(orderCaptor.capture());
-        OrderDocument savedOrder = orderCaptor.getValue();
+        verify(mongoTemplate, timeout(3000)).save(orderCaptor.capture());
+        OrderDocument savedOrder = (OrderDocument) orderCaptor.getValue();
         assertThat(savedOrder.getUserId()).isEqualTo("u1");
         assertThat(savedOrder.getItems()).hasSize(1);
         assertThat(savedOrder.getItems().get(0).getProductId()).isEqualTo("p1");
@@ -101,12 +112,12 @@ class SpaceBasedFlowTest {
         assertThat(response.getBody()).isEqualTo("Sold Out!");
         assertThat(hz.<String, Integer>getMap(STOCKS_MAP).get("p1")).isEqualTo(5);
         assertThat(hz.<String, Cart>getMap(CARTS_MAP).get("u1")).isNotNull();
-        verify(orderRepo, after(300).never()).save(any());
+        verify(mongoTemplate, after(300).never()).save(any(OrderDocument.class));
     }
 
     @Test
     void queueDistributesOneOrderToOnlyOneDataPump() {
-        MongoDataPump secondDataPump = new MongoDataPump(hz, orderRepo);
+        MongoDataPump secondDataPump = new MongoDataPump(hz, mongoTemplate, transactionTemplate);
         secondDataPump.init();
         try {
             cartPU.addToCart(cartRequest("u1", "p1", 1));
@@ -114,7 +125,7 @@ class SpaceBasedFlowTest {
             ResponseEntity<String> response = orderPU.checkout("u1");
 
             assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-            verify(orderRepo, timeout(3000).times(1)).save(any());
+            verify(mongoTemplate, timeout(3000).times(1)).save(any(OrderDocument.class));
         } finally {
             secondDataPump.shutdown();
         }
