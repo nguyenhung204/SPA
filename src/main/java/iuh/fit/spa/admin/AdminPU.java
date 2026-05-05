@@ -1,0 +1,95 @@
+package iuh.fit.spa.admin;
+
+import static iuh.fit.spa.config.HazelcastConfig.PRODUCTS_MAP;
+import static iuh.fit.spa.config.HazelcastConfig.STOCKS_MAP;
+
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
+import iuh.fit.spa.product.Product;
+import iuh.fit.spa.product.ProductMongoRepository;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Admin utilities — seed / reset data before k6 load tests.
+ *
+ * POST /admin/seed?count=100&stock=1000
+ *   → inserts <count> products into MongoDB + loads into Hazelcast
+ *
+ * DELETE /admin/reset
+ *   → clears products, stocks, carts maps in Hazelcast (does NOT drop Mongo)
+ */
+@RestController
+@RequestMapping("/admin")
+public class AdminPU {
+
+    private final HazelcastInstance hz;
+    private final ProductMongoRepository productRepo;
+
+    public AdminPU(HazelcastInstance hz, ProductMongoRepository productRepo) {
+        this.hz = hz;
+        this.productRepo = productRepo;
+    }
+
+    @PostMapping("/seed")
+    public ResponseEntity<Map<String, Object>> seed(
+            @RequestParam(defaultValue = "10") int count,
+            @RequestParam(defaultValue = "100") int stock) {
+
+        if (count <= 0 || count > 10_000) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "count must be between 1 and 10000"));
+        }
+        if (stock <= 0 || stock > 1_000_000) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("error", "stock must be between 1 and 1000000"));
+        }
+
+        IMap<String, Product> productMap = hz.getMap(PRODUCTS_MAP);
+        IMap<String, Integer> stockMap = hz.getMap(STOCKS_MAP);
+
+        List<Product> products = new ArrayList<>(count);
+        for (int i = 1; i <= count; i++) {
+            String id = UUID.randomUUID().toString();
+            Product p = new Product(
+                    id,
+                    "Product-" + i,
+                    "Flash-sale item #" + i,
+                    BigDecimal.valueOf(10L * i),
+                    stock);
+            products.add(p);
+        }
+
+        // Persist to MongoDB
+        productRepo.saveAll(products);
+
+        // Load into Hazelcast (applies to all cluster nodes via distributed map)
+        for (Product p : products) {
+            productMap.put(p.getId(), p);
+            stockMap.put(p.getId(), stock);
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "seeded", count,
+                "stockPerProduct", stock,
+                "sampleId", products.get(0).getId()
+        ));
+    }
+
+    @DeleteMapping("/reset")
+    public ResponseEntity<Map<String, String>> reset() {
+        hz.getMap(PRODUCTS_MAP).clear();
+        hz.getMap(STOCKS_MAP).clear();
+        hz.getMap("carts").clear();
+        return ResponseEntity.ok(Map.of("status", "Hazelcast maps cleared"));
+    }
+}
