@@ -63,6 +63,13 @@ export const options = {
 // Seeds 100 products × 1000 stock, returns productIds to all VUs
 // ---------------------------------------------------------------------------
 export function setup() {
+  console.log('[Setup] Resetting MongoDB + Hazelcast...');
+  const resetRes = http.del(`${BASE_URL}/admin/reset`);
+  if (resetRes.status !== 200) {
+    throw new Error(`[Setup] Reset failed — status=${resetRes.status} body=${resetRes.body}`);
+  }
+  console.log('[Setup] Reset OK');
+
   console.log(`[Setup] Seeding ${SEED_COUNT} products × stock=${SEED_STOCK} (total=${TOTAL_STOCK})...`);
   const res = http.post(`${BASE_URL}/admin/seed?count=${SEED_COUNT}&stock=${SEED_STOCK}`);
   if (res.status !== 200) {
@@ -74,6 +81,9 @@ export function setup() {
     throw new Error('[Setup] Seed returned no productIds');
   }
   console.log(`[Setup] Seed OK — ${productIds.length} products loaded into Hazelcast`);
+  // Drain stale in-flight requests from previous run before VUs start.
+  // Without this, leftover requests arrive AFTER seed clears stock → deduct newly-seeded inventory.
+  sleep(3);
   return { productIds };
 }
 
