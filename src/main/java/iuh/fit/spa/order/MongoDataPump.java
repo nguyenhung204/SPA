@@ -45,19 +45,29 @@ public class MongoDataPump {
     }
 
     private void pumpOrders() {
-        IQueue<OrderEvent> queue = hz.getQueue(ORDER_QUEUE);
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                OrderEvent event = queue.take();
-                persistWithRetry(event);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                log.error("[MongoDataPump] Unexpected error in worker thread: {}", e.getMessage());
+        try {
+            IQueue<OrderEvent> queue = hz.getQueue(ORDER_QUEUE);
+            while (!Thread.currentThread().isInterrupted()) {
+                if (!hz.getLifecycleService().isRunning()) break;
+                try {
+                    OrderEvent event = queue.take();
+                    persistWithRetry(event);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (com.hazelcast.core.HazelcastInstanceNotActiveException e) {
+                    break; // Hazelcast is shutting down, exit loop
+                } catch (Exception e) {
+                    log.error("[MongoDataPump] Unexpected error in worker thread: {}", e.getMessage());
+                    // Optional: add a small sleep to prevent rapid-fire errors if it's a persistent but non-fatal issue
+                    try { Thread.sleep(100); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                }
             }
+        } catch (com.hazelcast.core.HazelcastInstanceNotActiveException e) {
+            // Instance not even active at start
         }
     }
+
 
     private void persistWithRetry(OrderEvent event) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
