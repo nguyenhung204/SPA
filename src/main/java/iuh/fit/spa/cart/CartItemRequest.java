@@ -1,6 +1,6 @@
 package iuh.fit.spa.cart;
 
-public class CartItemRequest {
+public class CartItemRequest implements java.io.Serializable {
 
     private String userId;
     private String productId;
