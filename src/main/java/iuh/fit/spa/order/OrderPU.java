@@ -40,43 +40,53 @@ public class OrderPU {
     @PostMapping
     public ResponseEntity<String> checkout(@RequestParam String userId) {
         log.info("[Checkout] START — userId={}", userId);
-        Cart cart = cartMap.get(userId);
+
+        // Atomic get-and-remove: 1 network hop thay vì 2 (get rồi remove riêng lẻ)
+        // Dùng static inner class để Hazelcast có thể serialize gửi sang node khác trong cluster
+        Cart cart = cartMap.executeOnKey(userId, new GetAndRemoveCartProcessor());
+
         if (cart == null || cart.isEmpty()) {
+            log.warn("[Checkout] EMPTY CART — userId={}", userId);
             return ResponseEntity.badRequest().body("Cart is empty");
         }
 
         List<CartItem> deductedItems = new ArrayList<>();
         for (CartItem item : cart.getItems()) {
             if (!inventoryPU.deductStock(item.getProductId(), item.getQuantity())) {
+                // Rollback stock + đặt lại cart nếu sold out
                 rollbackDeductedItems(deductedItems);
+                cartMap.putIfAbsent(userId, cart); // khôi phục giỏ hàng
                 return ResponseEntity.badRequest().body("Sold Out!");
             }
             deductedItems.add(item);
         }
 
-        // Dùng nanoTime + random để tạo ID nhanh hơn UUID.randomUUID()
         String orderId = System.nanoTime() + "-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000);
         OrderEvent newOrder = new OrderEvent(orderId, userId, cart.getItems());
 
-        // Chờ tối đa 2 giây nếu hàng đợi đầy
         try {
+            // Queue không giới hạn (unbounded) nên offer() gần như luôn trả true ngay lập tức
             boolean queued = orderQueue.offer(newOrder, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
-
             if (!queued) {
-                log.error("[Checkout] QUEUE FULL — userId={}", userId);
+                log.error("[Checkout] QUEUE TIMEOUT — userId={}", userId);
                 rollbackDeductedItems(deductedItems);
+                cartMap.putIfAbsent(userId, cart);
                 return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             rollbackDeductedItems(deductedItems);
+            cartMap.putIfAbsent(userId, cart);
             return ResponseEntity.status(500).build();
+        } catch (com.hazelcast.core.HazelcastInstanceNotActiveException e) {
+            log.error("[Checkout] Hazelcast not active — userId={}", userId);
+            return ResponseEntity.status(503).body("Cluster not available");
         }
-        
-        cartMap.remove(userId);
+
         log.info("[Checkout] SUCCESS — userId={} orderId={}", userId, newOrder.getOrderId());
         return ResponseEntity.ok("Order Placed: " + newOrder.getOrderId());
     }
+
 
 
     private void rollbackDeductedItems(List<CartItem> deductedItems) {
@@ -84,5 +94,23 @@ public class OrderPU {
             inventoryPU.restoreStock(item.getProductId(), item.getQuantity());
         }
     }
+
+    /**
+     * Atomically reads the cart and removes it in a single network hop.
+     * Must be a static Serializable class so Hazelcast can send it to the
+     * partition-owner node in a multi-node cluster.
+     */
+    private static class GetAndRemoveCartProcessor
+            implements com.hazelcast.map.EntryProcessor<String, Cart, Cart>, java.io.Serializable {
+        @Override
+        public Cart process(java.util.Map.Entry<String, Cart> entry) {
+            Cart c = entry.getValue();
+            if (c != null && !c.isEmpty()) {
+                entry.setValue(null); // xoá ngay trong cùng 1 operation
+            }
+            return c;
+        }
+    }
 }
+
 
