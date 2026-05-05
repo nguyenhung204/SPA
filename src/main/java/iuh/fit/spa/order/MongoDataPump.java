@@ -20,8 +20,7 @@ public class MongoDataPump {
     private final HazelcastInstance hz;
     private final MongoTemplate mongoTemplate;
     private java.util.concurrent.ExecutorService executor;
-    // 30 threads đủ để drain queue nhanh mà không bão hoà connection pool của MongoDB Atlas
-    private static final int THREAD_COUNT = 30;
+    private static final int THREAD_COUNT = 50;
 
 
     public MongoDataPump(HazelcastInstance hz, MongoTemplate mongoTemplate) {
@@ -47,50 +46,59 @@ public class MongoDataPump {
     }
 
     private void pumpOrders() {
+        java.util.List<OrderEvent> buffer = new java.util.ArrayList<>();
         try {
             IQueue<OrderEvent> queue = hz.getQueue(ORDER_QUEUE);
             while (!Thread.currentThread().isInterrupted()) {
                 if (!hz.getLifecycleService().isRunning()) break;
+                
                 try {
-                    OrderEvent event = queue.take();
-                    persistWithRetry(event);
+                    // Lấy tối đa 100 đơn hàng từ queue trong 1 lần
+                    queue.drainTo(buffer, 100);
+                    
+                    if (buffer.isEmpty()) {
+                        // Nếu queue trống, đợi tối đa 1 giây để lấy 1 đơn hàng đầu tiên
+                        OrderEvent first = queue.poll(1, java.util.concurrent.TimeUnit.SECONDS);
+                        if (first != null) {
+                            buffer.add(first);
+                            // Sau khi có 1 cái, cố lấy thêm các cái đang chờ khác
+                            queue.drainTo(buffer, 99);
+                        }
+                    }
+
+                    if (!buffer.isEmpty()) {
+                        persistBulkWithRetry(buffer);
+                        buffer.clear();
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
-                } catch (com.hazelcast.core.HazelcastInstanceNotActiveException e) {
-                    break; // Hazelcast is shutting down, exit loop
                 } catch (Exception e) {
-                    log.error("[MongoDataPump] Unexpected error in worker thread: {}", e.getMessage());
-                    // Optional: add a small sleep to prevent rapid-fire errors if it's a persistent but non-fatal issue
-                    try { Thread.sleep(100); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+                    log.error("[MongoDataPump] Unexpected error: {}", e.getMessage());
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
                 }
             }
-        } catch (com.hazelcast.core.HazelcastInstanceNotActiveException e) {
-            // Instance not even active at start
+        } catch (Exception e) {
+            log.error("[MongoDataPump] Worker thread crashed: {}", e.getMessage());
         }
     }
 
-
-    private void persistWithRetry(OrderEvent event) {
+    private void persistBulkWithRetry(java.util.List<OrderEvent> events) {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                persistWithTransaction(event);
-                log.info("[MongoDataPump] Order persisted — orderId={} attempt={}", event.getOrderId(), attempt);
+                java.util.List<OrderDocument> docs = events.stream()
+                    .map(e -> new OrderDocument(e.getOrderId(), e.getUserId(), e.getItems()))
+                    .collect(java.util.stream.Collectors.toList());
+                
+                mongoTemplate.insertAll(docs);
+                log.info("[MongoDataPump] Bulk persisted {} orders — attempt={}", events.size(), attempt);
                 return;
             } catch (Exception e) {
-                log.error("[MongoDataPump] Transaction failed — orderId={} attempt={}/{} error={}",
-                        event.getOrderId(), attempt, MAX_RETRIES, e.getMessage());
+                log.error("[MongoDataPump] Bulk insert failed (attempt {}/{}): {}", attempt, MAX_RETRIES, e.getMessage());
                 if (attempt == MAX_RETRIES) {
-                    log.error("[MongoDataPump] DEAD LETTER — orderId={} giving up, manual intervention needed.",
-                            event.getOrderId());
+                    log.error("[MongoDataPump] CRITICAL: Lost batch of {} orders!", events.size());
                 }
             }
         }
-    }
-
-    private void persistWithTransaction(OrderEvent event) {
-        OrderDocument doc = new OrderDocument(event.getOrderId(), event.getUserId(), event.getItems());
-        mongoTemplate.save(doc);
-        log.debug("[MongoDataPump] Order document saved — orderId={}", event.getOrderId());
     }
 }

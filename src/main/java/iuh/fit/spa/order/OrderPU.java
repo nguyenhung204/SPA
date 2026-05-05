@@ -65,13 +65,14 @@ public class OrderPU {
         OrderEvent newOrder = new OrderEvent(orderId, userId, cart.getItems());
 
         try {
-            // Queue không giới hạn (unbounded) nên offer() gần như luôn trả true ngay lập tức
-            boolean queued = orderQueue.offer(newOrder, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
+            // Giảm timeout xuống 100ms để giải phóng luồng Tomcat nhanh hơn nếu hệ thống quá tải
+            boolean queued = orderQueue.offer(newOrder, 100, java.util.concurrent.TimeUnit.MILLISECONDS);
             if (!queued) {
-                log.error("[Checkout] QUEUE TIMEOUT — userId={}", userId);
+                log.warn("[Checkout] QUEUE FULL — userId={}", userId);
                 rollbackDeductedItems(deductedItems);
                 cartMap.putIfAbsent(userId, cart);
-                return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
+                // Trả về 503 để k6 biết server đang quá tải (backpressure)
+                return ResponseEntity.status(503).body("System busy, please retry");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
