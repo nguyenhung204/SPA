@@ -65,8 +65,8 @@ public class OrderPU {
         OrderEvent newOrder = new OrderEvent(orderId, userId, cart.getItems());
 
         try {
-            // Giảm timeout xuống 100ms để giải phóng luồng Tomcat nhanh hơn nếu hệ thống quá tải
-            boolean queued = orderQueue.offer(newOrder, 100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            // Tăng timeout lên 2s — dưới tải cao Hazelcast cần thêm thời gian enqueue
+            boolean queued = orderQueue.offer(newOrder, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
             if (!queued) {
                 log.warn("[Checkout] QUEUE FULL — userId={}", userId);
                 rollbackDeductedItems(deductedItems);
