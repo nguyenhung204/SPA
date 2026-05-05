@@ -1,31 +1,31 @@
 {
-  "timestamp": "2026-05-05T12:19:44.263Z",
+  "timestamp": "2026-05-05T12:27:38.022Z",
   "seedConfig": {
     "count": 100,
     "stockPerProduct": 2000,
     "totalStock": 200000
   },
   "results": {
-    "checkoutSuccess200": 10851,
+    "checkoutSuccess200": 11838,
     "checkoutSoldOut400": 0,
     "checkoutCartEmpty400": 0,
     "checkoutBadRequestOther400": 0,
-    "checkoutServerErrors5xx": 198,
-    "cartAddFailures": 25225
+    "checkoutServerErrors5xx": 436,
+    "cartAddFailures": 25428
   },
   "stock": {
     "initial": 200000,
-    "sold": 10851,
-    "remaining": 189149
+    "sold": 11838,
+    "remaining": 188162
   },
   "latencyMs": {
-    "max": 3810.1561,
-    "avg": 1253.0797087700325,
-    "min": 24.1465,
-    "med": 1260.0273,
-    "p(90)": 2098.8790200000003,
-    "p(95)": 2358.9266000000002,
-    "p(99)": 2773.390428
+    "med": 1205.2799,
+    "p(90)": 2010.2470700000001,
+    "p(95)": 2205.6373800000006,
+    "p(99)": 2518.0442090000006,
+    "max": 3269.546,
+    "avg": 1194.3334707430352,
+    "min": 45.771
   },
   "pass": false
 }

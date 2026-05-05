@@ -20,7 +20,9 @@ public class MongoDataPump {
     private final HazelcastInstance hz;
     private final MongoTemplate mongoTemplate;
     private java.util.concurrent.ExecutorService executor;
-    private static final int THREAD_COUNT = 20;
+    // 30 threads đủ để drain queue nhanh mà không bão hoà connection pool của MongoDB Atlas
+    private static final int THREAD_COUNT = 30;
+
 
     public MongoDataPump(HazelcastInstance hz, MongoTemplate mongoTemplate) {
         this.hz = hz;

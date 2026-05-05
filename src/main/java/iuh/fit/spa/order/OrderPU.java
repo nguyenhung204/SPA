@@ -10,7 +10,7 @@ import iuh.fit.spa.cart.CartItem;
 import iuh.fit.spa.inventory.InventoryPU;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -58,9 +58,10 @@ public class OrderPU {
         String orderId = System.nanoTime() + "-" + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000);
         OrderEvent newOrder = new OrderEvent(orderId, userId, cart.getItems());
 
-        // Chờ tối đa 500ms nếu hàng đợi đầy thay vì trả về lỗi ngay lập tức
+        // Chờ tối đa 2 giây nếu hàng đợi đầy
         try {
-            boolean queued = orderQueue.offer(newOrder, 500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean queued = orderQueue.offer(newOrder, 2000, java.util.concurrent.TimeUnit.MILLISECONDS);
+
             if (!queued) {
                 log.error("[Checkout] QUEUE FULL — userId={}", userId);
                 rollbackDeductedItems(deductedItems);

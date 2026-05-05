@@ -30,8 +30,15 @@ public class InventoryPU {
      */
     public boolean deductStock(String productId, int quantity) {
         if (quantity <= 0) return false;
-        return Boolean.TRUE.equals(stockMap.executeOnKey(productId, new DeductStockProcessor(quantity)));
+        boolean success = Boolean.TRUE.equals(stockMap.executeOnKey(productId, new DeductStockProcessor(quantity)));
+        if (success) {
+            log.info("[Inventory] Deducted {} from {}", quantity, productId);
+        } else {
+            log.warn("[Inventory] FAILED to deduct {} from {} (Insufficient stock or not found)", quantity, productId);
+        }
+        return success;
     }
+
 
     public void restoreStock(String productId, int quantity) {
         if (quantity <= 0) return;

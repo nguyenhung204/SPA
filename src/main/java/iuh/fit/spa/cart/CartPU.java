@@ -31,11 +31,13 @@ public class CartPU {
 
     @PostMapping("/add")
     public String addToCart(@RequestBody CartItemRequest req) {
-        // Chạy bất đồng bộ, Tomcat thread sẽ trả về "Added to cart" ngay lập tức
-        // Hazelcast sẽ tự xử lý việc cập nhật trong background
-        cartMap.submitToKey(req.getUserId(), new AddToCartProcessor(req.getProductId(), req.getQuantity()));
+        log.info("[Cart] ADD — user={} product={} qty={}", req.getUserId(), req.getProductId(), req.getQuantity());
+        // executeOnKey: chạy đồng bộ trên partition thread, đảm bảo ghi xong trước khi trả response
+        // Không dùng submitToKey (deprecated Hazelcast 5.x + race condition với checkout)
+        cartMap.executeOnKey(req.getUserId(), new AddToCartProcessor(req.getProductId(), req.getQuantity()));
         return "Added to cart";
     }
+
 
 
     private static class AddToCartProcessor implements com.hazelcast.map.EntryProcessor<String, Cart, Void>, java.io.Serializable {
