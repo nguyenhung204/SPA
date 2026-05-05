@@ -39,6 +39,7 @@ public class OrderPU {
 
     @PostMapping
     public ResponseEntity<String> checkout(@RequestParam String userId) {
+        log.info("[Checkout] START — userId={}", userId);
         Cart cart = cartMap.get(userId);
         if (cart == null || cart.isEmpty()) {
             return ResponseEntity.badRequest().body("Cart is empty");
@@ -54,15 +55,25 @@ public class OrderPU {
         }
 
         OrderEvent newOrder = new OrderEvent(UUID.randomUUID().toString(), userId, cart.getItems());
-        boolean queued = orderQueue.offer(newOrder);
-        if (!queued) {
+        // Chờ tối đa 500ms nếu hàng đợi đầy thay vì trả về lỗi ngay lập tức
+        try {
+            boolean queued = orderQueue.offer(newOrder, 500, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!queued) {
+                log.error("[Checkout] QUEUE FULL — userId={}", userId);
+                rollbackDeductedItems(deductedItems);
+                return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             rollbackDeductedItems(deductedItems);
-            return ResponseEntity.status(503).body("Service temporarily unavailable — please retry");
+            return ResponseEntity.status(500).build();
         }
         
         cartMap.remove(userId);
+        log.info("[Checkout] SUCCESS — userId={} orderId={}", userId, newOrder.getOrderId());
         return ResponseEntity.ok("Order Placed: " + newOrder.getOrderId());
     }
+
 
     private void rollbackDeductedItems(List<CartItem> deductedItems) {
         for (CartItem item : deductedItems) {

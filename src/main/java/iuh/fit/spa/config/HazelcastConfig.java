@@ -56,12 +56,22 @@ public class HazelcastConfig {
                 .addMember("192.168.11.188")
                 .addMember("192.168.11.195");
 
-        // Carts Map Config: 30 minutes TTL to prevent memory leaks
+        // Carts Map Config: Dữ liệu tạm, tắt Backup để tăng tốc độ ghi tối đa
         config.addMapConfig(new com.hazelcast.config.MapConfig(CARTS_MAP)
                 .setTimeToLiveSeconds(30 * 60)
-                .setBackupCount(1));
+                .setBackupCount(0)); // 0 backup = ghi thẳng vào RAM, không chờ đợi qua mạng
 
-        log.info("[Hazelcast] Starting cluster 'flashsale-local' — members: 192.168.11.176, 192.168.10.227, 192.168.11.188");
+        // Stocks Map: Cần độ chính xác cao nhưng cũng cần tốc độ
+        config.addMapConfig(new com.hazelcast.config.MapConfig(STOCKS_MAP)
+                .setBackupCount(0)); 
+
+        // Tăng số lượng thread xử lý I/O của Hazelcast
+        config.getExecutorConfig("default")
+                .setPoolSize(100)
+                .setQueueCapacity(10000);
+
+        log.info("[Hazelcast] Starting cluster 'flashsale-local' with NO-BACKUP optimization for speed.");
+
         HazelcastInstance hz = Hazelcast.newHazelcastInstance(config);
         log.info("[Hazelcast] Instance started. Cluster size: {}", hz.getCluster().getMembers().size());
         loadProductsAndStocks(hz);
